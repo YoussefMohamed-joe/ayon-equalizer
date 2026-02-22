@@ -29,24 +29,31 @@ def rename_frames_to_ayon_style(
 ) -> list[str]:
     """Rename frame.*.exr to plate_base_name.NNNN.exr in place.
 
+    Runs multiple passes until no frame.*.exr remain (Image Warp may still
+    be writing when the first pass runs). Returns the list of final filenames
+    by globbing plate_base_name.*.exr so the representation matches disk
+    and AYON sees a single sequence.
+
     Returns:
         List of new filenames (e.g. pip_sq01_matchmoveMain_v014.1001.exr).
     """
     time.sleep(1.5)
-    frame_files = sorted(undistorted_dir.glob("frame.*.exr"))
-    out = []
-    for f in frame_files:
-        m = re.match(r"frame\.(\d+)\.exr$", f.name, re.IGNORECASE)
-        if m:
-            new_name = f"{plate_base_name}.{m.group(1)}.exr"
-            new_path = f.parent / new_name
-            if new_path != f:
-                try:
-                    f.rename(new_path)
-                except OSError as e:
-                    log.warning("Could not rename %s to %s: %s", f.name, new_name, e)
-                    new_name = f.name
-            out.append(new_name)
-        else:
-            out.append(f.name)
+    max_passes = 5
+    for _ in range(max_passes):
+        frame_files = sorted(undistorted_dir.glob("frame.*.exr"))
+        if not frame_files:
+            break
+        for f in frame_files:
+            m = re.match(r"frame\.(\d+)\.exr$", f.name, re.IGNORECASE)
+            if m:
+                new_name = f"{plate_base_name}.{m.group(1)}.exr"
+                new_path = f.parent / new_name
+                if new_path != f:
+                    try:
+                        f.rename(new_path)
+                    except OSError as e:
+                        log.warning("Could not rename %s to %s: %s", f.name, new_name, e)
+        time.sleep(0.5)
+    # Build list from disk so we only report one pattern (no mixed frame.* + plate.*)
+    out = sorted(f.name for f in undistorted_dir.glob(f"{plate_base_name}.*.exr"))
     return out

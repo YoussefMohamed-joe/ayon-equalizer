@@ -16,7 +16,8 @@ These are **additions**. When merging, upstream will not have them, so there are
 | `client/ayon_equalizer/api/publish_path.py` | Resolve full matchmove version folder path for script plate path. |
 | `client/ayon_equalizer/api/plate_naming.py` | AYON-style plate base name and rename of staged frame.*.exr. |
 | `client/ayon_equalizer/api/context_from_workfile.py` | Set context projectRoot/folderPath from current workfile path. |
-| `client/ayon_equalizer/plugins/publish/extract_undistorted_plate.py` | Extractor that runs Image Warp when Distortion is on. |
+| `client/ayon_equalizer/plugins/publish/extract_undistorted_plate.py` | Extractor that runs Image Warp when Distortion is on; adds undistorted_plate representation to the matchmove instance only. |
+| `client/ayon_equalizer/plugins/publish/integrate_plate_from_matchmove.py` | After integrate: creates a plate product in AYON that points to the matchmove's undistorted_plate representation (same path, no duplicate files). |
 | `docs/undistorted_plate_and_matchmove_publish.md` | Documentation for undistorted plate and matchmove publish. |
 | `docs/CONTRIBUTING_AND_MERGE.md` | This file. |
 

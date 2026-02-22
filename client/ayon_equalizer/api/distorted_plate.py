@@ -35,19 +35,22 @@ def run_image_warp_and_add_representation(
     staging_dir: str,
     tde4_path: Path,
     log: Any,
+    plate_instance: "pyblish.api.Instance | None" = None,
 ) -> None:
-    """When Distortion is on: run Image Warp in the background and add representation.
+    """When Distortion is on: run Image Warp and add representation.
 
     All of this runs during publish (no user interaction):
     - Uses the **selected camera** (first enabled camera from the instance).
     - Uses **overscan** from the camera's lens distortion (same as overscan % in the form).
-    - Writes to **staging_dir/undistorted_plate**; Ayon then publishes from there to
-      the version folder (custom or default publish path).
+    - Writes to **staging_dir/undistorted_plate**. The representation is added to the
+      matchmove instance only. A post-integrate plugin creates a plate product in AYON
+      that points to this representation (same path, no duplicate files).
 
-    instance: pyblish Instance with cameras data.
+    instance: matchmove pyblish Instance with cameras data.
     staging_dir: staging directory (string); Ayon publishes from here.
     tde4_path: path to 3DE install (Path).
     log: logger for info/warnings.
+    plate_instance: unused (kept for API compatibility).
     """
     staging_path = Path(staging_dir)
     undistorted_dir = staging_path / "undistorted_plate"
@@ -128,6 +131,11 @@ def run_image_warp_and_add_representation(
     plate_base_name = get_plate_base_name(instance)
     frame_filenames = rename_frames_to_ayon_style(undistorted_dir, plate_base_name, log)
 
+    # Always set on matchmove so Maya script can reference the plate path
+    instance.data["plate_base_name"] = plate_base_name
+
+    # Add EXR representation to the matchmove instance only (same path).
+    # A separate integrate plugin creates a plate product in AYON that points to this representation.
     if "representations" not in instance.data:
         instance.data["representations"] = []
     log.info(
@@ -141,7 +149,6 @@ def run_image_warp_and_add_representation(
         "stagingDir": str(undistorted_dir),
         "files": frame_filenames,
     })
-    instance.data["plate_base_name"] = plate_base_name
 
 
 def _run_image_warp(
