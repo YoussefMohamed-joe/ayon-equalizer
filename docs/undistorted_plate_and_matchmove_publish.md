@@ -88,3 +88,5 @@ The **extractors** and **collectors** then only do thin calls into these modules
 - The **plate path in the Maya script** is the **full publish path** and uses **AYON-style filenames**, so the script finds the plate regardless of CWD and matches AYON naming.
 - The **undistorted plate** is published as part of the **matchmove product** in the **same version folder**.
 - **Path resolution**, **plate naming**, and **workfile context** are in **small, separate modules** so the main publish code stays minimal and easy to maintain.
+
+**See also:** [Contributing and merging with upstream](CONTRIBUTING_AND_MERGE.md) for which files are custom vs modified and how to merge with the official AYON equalizer addon with minimal conflicts.

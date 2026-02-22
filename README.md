@@ -17,6 +17,7 @@ Run `python create_package.py` in the root of the repository and upload resultin
 ## Documentation
 
 - [Undistorted plate and matchmove publish](docs/undistorted_plate_and_matchmove_publish.md) — How automatic Image Warp, full-path plate reference, and AYON-style naming work when Distortion is on, and why the code is structured that way.
+- [Contributing and merging with upstream](docs/CONTRIBUTING_AND_MERGE.md) — Which files are custom vs modified, code style to match the official addon, and how to merge with the main AYON equalizer addon with minimal conflicts.
 
 ## Notes
 

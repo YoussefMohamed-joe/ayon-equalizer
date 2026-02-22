@@ -12,9 +12,13 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import tde4
+
+if TYPE_CHECKING:
+    import pyblish.api
 from ayon_core.pipeline import KnownPublishError
 
 from ayon_equalizer.api.overscan import bbdld_compute_bounding_box
@@ -27,10 +31,10 @@ IMAGE_WARP_POLL_INTERVAL = 2
 
 
 def run_image_warp_and_add_representation(
-    instance,
+    instance: "pyblish.api.Instance",
     staging_dir: str,
     tde4_path: Path,
-    log,
+    log: Any,
 ) -> None:
     """When Distortion is on: run Image Warp in the background and add representation.
 

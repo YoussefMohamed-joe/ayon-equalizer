@@ -9,7 +9,10 @@ if TYPE_CHECKING:
 
 
 def get_matchmove_publish_dir(instance: "pyblish.api.Instance") -> Optional[str]:
-    """Full path to the matchmove version folder where AYON publishes (e.g. .../matchmoveMain/v014)."""
+    """Return full path to the matchmove version folder where AYON publishes.
+
+    E.g. .../matchmoveMain/v014. Returns None if project root cannot be resolved.
+    """
     project_root = None
     ctx = instance.context
     project_name = instance.data.get("projectName") or (ctx.data.get("projectName") if ctx else None) or ""

@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import pyblish.api
@@ -25,9 +25,13 @@ def get_plate_base_name(instance: "pyblish.api.Instance") -> str:
 def rename_frames_to_ayon_style(
     undistorted_dir: Path,
     plate_base_name: str,
-    log,
+    log: Any,
 ) -> list[str]:
-    """Rename frame.*.exr to plate_base_name.NNNN.exr in place. Returns new filenames."""
+    """Rename frame.*.exr to plate_base_name.NNNN.exr in place.
+
+    Returns:
+        List of new filenames (e.g. pip_sq01_matchmoveMain_v014.1001.exr).
+    """
     time.sleep(1.5)
     frame_files = sorted(undistorted_dir.glob("frame.*.exr"))
     out = []

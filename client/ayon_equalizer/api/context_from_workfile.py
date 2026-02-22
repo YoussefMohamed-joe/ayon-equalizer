@@ -1,9 +1,17 @@
 """Set context projectRoot and folderPath from current workfile path."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def set_project_root_from_path(context, current_file: str) -> None:
-    """If current_file is under .../projects/Name/..., set context.data projectRoot and folderPath."""
+if TYPE_CHECKING:
+    import pyblish.api
+
+
+def set_project_root_from_path(
+    context: "pyblish.api.Context",
+    current_file: str,
+) -> None:
+    """Set context.data projectRoot and folderPath when current_file is under .../projects/Name/..."""
     normalized = (current_file or "").replace("\\", "/")
     if "/projects/" not in normalized:
         return
