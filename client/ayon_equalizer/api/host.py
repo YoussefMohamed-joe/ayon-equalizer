@@ -251,16 +251,29 @@ class EqualizerHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
     def add_publish_instance(self, instance_data: dict) -> None:
         """Add a publish instance to the current project.
 
-        Args:
-            instance_data (dict): Publish instance to add.
-
+        For matchmove instances, overscan is computed from the selected camera
+        and written into attribute_values before storing, so the instance is
+        created with overscan width/height already set.
         """
+        is_matchmove = (
+            instance_data.get("product_type") == "matchmove"
+            or instance_data.get("family") == "matchmove"
+            or instance_data.get("creator_identifier") == "io.ayon.creators.equalizer.matchmove"
+        )
+        if is_matchmove:
+            self._inject_matchmove_overscan(instance_data)
+
         data = self.get_ayon_data()
         publish_instances = self.get_publish_instances()
         publish_instances.append(instance_data)
         data[EQUALIZER_INSTANCES_KEY] = publish_instances
 
         self.update_ayon_data(data)
+
+    def _inject_matchmove_overscan(self, instance_data: dict) -> None:
+        """Fill overscan on instance_data from camera. Delegates to overscan module."""
+        from ayon_equalizer.api.overscan import inject_matchmove_overscan
+        inject_matchmove_overscan(instance_data)
 
     def update_publish_instance(
             self,

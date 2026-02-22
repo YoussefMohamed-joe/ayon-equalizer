@@ -14,6 +14,10 @@ Integration includes:
 ## Building and Installing
 Run `python create_package.py` in the root of the repository and upload resulting zip file to your AYON instance.
 
+## Documentation
+
+- [Undistorted plate and matchmove publish](docs/undistorted_plate_and_matchmove_publish.md) — How automatic Image Warp, full-path plate reference, and AYON-style naming work when Distortion is on, and why the code is structured that way.
+
 ## Notes
 
 This integration is installing PySide2 into 3DEqualizer environment as it doesn't ship with Qt support. This comes with some price - to make Qt UI work with 3DEqualizer, `processEvent()` is periodically called. This is not optimal and it might create some issues, like 3Dequalizer crashing or UI lags.

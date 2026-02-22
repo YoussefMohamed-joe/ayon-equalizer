@@ -3,6 +3,7 @@ import tde4
 from ayon_core.lib import EnumDef
 
 from ayon_equalizer.api import EqualizerCreator
+from ayon_equalizer.api.overscan import inject_matchmove_overscan
 
 
 class CreateMatchMove(EqualizerCreator):
@@ -57,7 +58,7 @@ class CreateMatchMove(EqualizerCreator):
 
     def create(
             self, product_name: str,
-            instance_data: dict, pre_create_data: dict) -> None:
-        """Create Match Move subset."""
-        self.log.debug("CreateMatchMove.create")
-        super().create(product_name, instance_data, pre_create_data)
+            instance_data: dict, pre_create_data: dict):
+        """Create Match Move subset. Overscan is filled from camera before store."""
+        inject_matchmove_overscan(instance_data)
+        return super().create(product_name, instance_data, pre_create_data)

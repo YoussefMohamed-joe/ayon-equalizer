@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ayon_core.lib import BoolDef, EnumDef, NumberDef
+
 from ayon_core.pipeline import (
     CreatedInstance,
     Creator,
@@ -103,6 +104,7 @@ class ExtractScriptBase(OptionalPyblishPluginMixin):
 
     hide_reference_frame = False
     export_uv_textures = False
+    distortion = False
     overscan_percent_width = 100
     overscan_percent_height = 100
     units = "mm"
@@ -110,7 +112,7 @@ class ExtractScriptBase(OptionalPyblishPluginMixin):
     @classmethod
     def apply_settings(
             cls, project_settings: dict,
-            system_settings: dict) -> None:  # noqa: ARG003
+            system_settings: dict | None = None) -> None:  # noqa: ARG003
         """Apply settings from the configuration."""
         settings = project_settings["equalizer"]["publish"][
             "ExtractMatchmoveScriptMaya"]
@@ -119,6 +121,7 @@ class ExtractScriptBase(OptionalPyblishPluginMixin):
             "hide_reference_frame", cls.hide_reference_frame)
         cls.export_uv_textures = settings.get(
             "export_uv_textures", cls.export_uv_textures)
+        cls.distortion = settings.get("distortion", cls.distortion)
         cls.overscan_percent_width = settings.get(
             "overscan_percent_width", cls.overscan_percent_width)
         cls.overscan_percent_height = settings.get(
@@ -137,18 +140,25 @@ class ExtractScriptBase(OptionalPyblishPluginMixin):
             BoolDef("export_uv_textures",
                     label="Export UV Textures",
                     default=cls.export_uv_textures),
+            BoolDef("distortion",
+                    label="Distortion",
+                    default=cls.distortion,
+                    tooltip="When enabled, compute overscan from lens distortion bbox, "
+                    "publish undistorted plate via Image Warp, and point Maya to it."),
             NumberDef("overscan_percent_width",
                       label="Overscan Width %",
                       default=cls.overscan_percent_width,
-                      decimals=0,
+                      decimals=4,
                       minimum=1,
-                      maximum=1000),
+                      maximum=10000,
+                      tooltip="Filled automatically from lens when creating matchmove."),
             NumberDef("overscan_percent_height",
                       label="Overscan Height %",
                       default=cls.overscan_percent_height,
-                      decimals=0,
+                      decimals=4,
                       minimum=1,
-                      maximum=1000),
+                      maximum=10000,
+                      tooltip="Filled automatically from lens when creating matchmove."),
             EnumDef("units",
                     ["mm", "cm", "m", "in", "ft", "yd"],
                     default=cls.units,

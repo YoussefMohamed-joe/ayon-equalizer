@@ -1,10 +1,9 @@
 """Loader for image sequences.
 
-This loads published sequence to the current camera
-because this workflow is the most common in production.
-
-If current camera is not defined, it will try to use first camera and
-if there is no camera at all, it will create new one.
+This loads a published sequence into a camera and sets the camera path
+(tde4.setCameraPath). Use it for plates, renders, or the matchmove
+product's "undistorted_plate" (Image Warp) representation so the camera
+uses the path of the published plate from the Ayon product.
 
 TODO (antirotor):
     * Support for setting handles, calculation frame ranges, EXR
@@ -37,6 +36,7 @@ class LoadPlate(load.LoaderPlugin):
         "plate",
         "image",
         "online",
+        "matchmove",  # undistorted_plate rep from matchmove → set path on camera
     ]
 
     representations: ClassVar[list[str]] = ["*"]

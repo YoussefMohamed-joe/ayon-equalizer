@@ -1,5 +1,6 @@
 """Extract project for Maya."""
 
+import os
 from pathlib import Path
 from typing import ClassVar
 
@@ -14,6 +15,7 @@ from ayon_core.pipeline import (
 
 from ayon_equalizer.api import ExtractScriptBase, maintained_model_selection
 from ayon_equalizer.api.lib import maya_valid_name
+from ayon_equalizer.api.publish_path import get_matchmove_publish_dir
 
 EQUALIZER_7 = 7
 EQUALIZER_8 = 8
@@ -31,7 +33,8 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
     hosts: ClassVar[list] = ["equalizer"]
     optional = True
 
-    order = pyblish.api.ExtractorOrder
+    # Run after Extract Undistorted Plate (Image Warp) so the plate exists when we point the script at it
+    order = pyblish.api.ExtractorOrder + 0.1
 
     # intentionally ignoring complexity warning (PLR0915 and PLR0912) because
     # of the nature of the export scripts in 3DEqualizer.
@@ -46,9 +49,17 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
         from the state of the project.
 
         """
+        # Only run on matchmove instances from the host (plate instance has no creator_attributes)
+        if "creator_attributes" not in instance.data:
+            return
         if not self.is_active(instance.data):
             return
         attr_data = self.get_attr_values_from_data(instance.data)
+        use_distortion = attr_data.get("distortion", False)
+
+        # Overscan is filled automatically when creating matchmove; defaults to 100 if not set
+        overscan_width = attr_data["overscan_percent_width"] / 100.0
+        overscan_height = attr_data["overscan_percent_height"] / 100.0
 
         # import maya export script from 3DEqualizer
         exporter_path = instance.context.data["tde4_path"] / "sys_data" / "py_scripts" / "export_maya.py"  # noqa: E501
@@ -69,10 +80,11 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
 
         # Here we subtract 1 because 3DE is computing the offset with an offset
         offset = tde4.getCameraFrameOffset(tde4.getCurrentCamera()) - 1
-        overscan_width = attr_data["overscan_percent_width"] / 100.0
-        overscan_height = attr_data["overscan_percent_height"] / 100.0
 
         staging_dir = self.staging_dir(instance)
+
+        # Undistorted plate (if Distortion on) was extracted by the previous step:
+        # "Extract Undistorted Plate (Image Warp)". We run after it.
 
         unit_scales = {
             "mm": 10.0,  # cm -> mm
@@ -177,6 +189,54 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
             # for EM102
             err_msg = f"Export failed {status}"
             raise KnownPublishError(err_msg)
+
+        # When distortion is enabled, point Maya script to the undistorted
+        # plate EXRs. Prefer full publish path so the script works without relying on CWD.
+        if use_distortion and instance.context.data["tde4_version"].major == EQUALIZER_8:
+            enabled_cams = [
+                c for c in instance.data["cameras"]
+                if c["enabled"]
+            ]
+            if enabled_cams:
+                first_cam = enabled_cams[0]["id"]
+                original_plate_pattern = enabled_cams[0]["path"]
+                sattr = tde4.getCameraSequenceAttr(first_cam)
+                start_frame = sattr[0]
+                # Use AYON product name (pip_sq01_matchmoveMain_v014.*.exr) set by Extract Undistorted Plate
+                plate_base_name = instance.data.get("plate_base_name")
+                if plate_base_name:
+                    plate_pattern = f"{plate_base_name}.####.exr"
+                    first_frame_name = f"{plate_base_name}.{start_frame:04d}.exr"
+                else:
+                    plate_pattern = "frame.####.exr"
+                    first_frame_name = f"frame.{start_frame:04d}.exr"
+                full_dir = get_matchmove_publish_dir(instance)
+                if full_dir:
+                    plate_path = os.path.join(full_dir, plate_pattern).replace("\\", "/")
+                    first_frame_path = os.path.join(full_dir, first_frame_name).replace("\\", "/")
+                else:
+                    plate_path = str(Path("..") / plate_pattern).replace("\\", "/")
+                    first_frame_path = str(Path("..") / first_frame_name).replace("\\", "/")
+                script_path = Path(f"{file_path.as_posix()}.py")
+                if script_path.exists():
+                    content = script_path.read_text(encoding="utf-8")
+                    original_escaped = original_plate_pattern.replace(
+                        "\\", "\\\\"
+                    )
+                    content = content.replace(
+                        original_escaped, plate_path
+                    )
+                    maya_prepare = exporter._maya_prepareImagePath(  # noqa: SLF001
+                        original_plate_pattern, start_frame
+                    )
+                    content = content.replace(
+                        maya_prepare, first_frame_path
+                    )
+                    script_path.write_text(content, encoding="utf-8")
+                    self.log.debug(
+                        "Rewrote Maya script to use undistorted plate: %s",
+                        plate_path,
+                    )
 
         self.log.debug("output: %s", file_path.as_posix())
         instance.data["representations"].append(representation)
