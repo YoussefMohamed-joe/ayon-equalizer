@@ -9,6 +9,7 @@ from __future__ import annotations
 import glob
 import importlib.util
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -28,6 +29,10 @@ from ayon_equalizer.api.plate_naming import get_plate_base_name, rename_frames_t
 _image_warp_poll_state = None
 IMAGE_WARP_POLL_TIMEOUT = 600
 IMAGE_WARP_POLL_INTERVAL = 2
+
+# Match main Image Warp output format (JPG); use "jpg" so loader and Nuke Read work like manual warp
+IMAGE_WARP_EXT = "jpg"
+IMAGE_WARP_PATTERN = "frame.####.jpg"
 
 
 def run_image_warp_and_add_representation(
@@ -102,8 +107,27 @@ def run_image_warp_and_add_representation(
         output_path,
     )
     image_warp_error = None
+
+    # Prefer overscan percent already computed for the instance (same values
+    # used by the publish form and Maya/Nuke exports) so Image Warp output
+    # resolution matches the manual overscan behaviour.
+    overscan_width_pct = overscan_height_pct = None
+    attrs = instance.data.get("attribute_values") or {}
     try:
-        _run_image_warp(tde4_path, first_cam_id, output_path, log)
+        overscan_width_pct = float(attrs.get("overscan_percent_width"))
+        overscan_height_pct = float(attrs.get("overscan_percent_height"))
+    except (TypeError, ValueError):
+        overscan_width_pct = overscan_height_pct = None
+
+    try:
+        _run_image_warp(
+            tde4_path,
+            first_cam_id,
+            output_path,
+            log,
+            overscan_width_pct,
+            overscan_height_pct,
+        )
         log.info("Image Warp finished.")
     except Exception as e:
         image_warp_error = e
@@ -115,8 +139,8 @@ def run_image_warp_and_add_representation(
             undistorted_dir.as_posix(),
         )
 
-    # List actual frame files (Image Warp writes frame.####.exr)
-    frame_files = sorted(undistorted_dir.glob("frame.*.exr"))
+    # List actual frame files (Image Warp writes frame.####.jpg to match main Image Warp output)
+    frame_files = sorted(undistorted_dir.glob(f"frame.*.{IMAGE_WARP_EXT}"))
     if not frame_files:
         msg = (
             "No undistorted frames were rendered. Not adding undistorted_plate representation. "
@@ -129,26 +153,91 @@ def run_image_warp_and_add_representation(
         return
 
     plate_base_name = get_plate_base_name(instance)
-    frame_filenames = rename_frames_to_ayon_style(undistorted_dir, plate_base_name, log)
+    frame_filenames = rename_frames_to_ayon_style(
+        undistorted_dir, plate_base_name, IMAGE_WARP_EXT, log
+    )
+
+    # Embed colorspace in EXR headers only; JPG matches main Image Warp and loads normally
+    if IMAGE_WARP_EXT == "exr":
+        _embed_exr_colorspace(undistorted_dir, frame_filenames, "ACES - ACEScg", log)
 
     # Always set on matchmove so Maya script can reference the plate path
     instance.data["plate_base_name"] = plate_base_name
+    instance.data["plate_ext"] = IMAGE_WARP_EXT
 
-    # Add EXR representation to the matchmove instance only (same path).
+    # Add representation to the matchmove instance only (same path).
     # A separate integrate plugin creates a plate product in AYON that points to this representation.
     if "representations" not in instance.data:
         instance.data["representations"] = []
     log.info(
-        "Adding undistorted_plate representation with %d frame(s) to matchmove (%s.*.exr).",
+        "Adding undistorted_plate representation with %d frame(s) to matchmove (%s.*.%s).",
         len(frame_filenames),
         plate_base_name,
+        IMAGE_WARP_EXT,
     )
+    # Match other addons (e.g. Nuke): ext as name for loader, ext in data, same keys
     instance.data["representations"].append({
         "name": "undistorted_plate",
-        "ext": "exr",
+        "ext": IMAGE_WARP_EXT,
         "stagingDir": str(undistorted_dir),
         "files": frame_filenames,
+        "data": {"ext": IMAGE_WARP_EXT},
+        "colorspaceData": {"colorspace": "ACES - ACEScg"},
     })
+
+
+def _embed_exr_colorspace(
+    undistorted_dir: Path,
+    frame_filenames: list[str],
+    colorspace: str,
+    log: Any,
+) -> None:
+    """Write colorspace into EXR file headers so normal Read in Nuke (and others) displays correctly.
+
+    Uses oiiotool (OpenImageIO) when available; if not, we skip and rely on representation
+    colorspaceData for AYON loaders only.
+    """
+    try:
+        subprocess.run(
+            ["oiiotool", "--help"],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        log.debug(
+            "oiiotool not found or timed out; EXR colorspace will not be embedded in files. "
+            "Normal Read in Nuke may show black; use AYON loader or set Read colorspace manually."
+        )
+        return
+    for fname in frame_filenames:
+        path = undistorted_dir / fname
+        if not path.is_file():
+            continue
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        try:
+            subprocess.run(
+                [
+                    "oiiotool",
+                    str(path),
+                    "--sattrib",
+                    "colorspace",
+                    colorspace,
+                    "-o",
+                    str(tmp),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=120,
+            )
+            os.replace(tmp, path)
+        except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired) as e:
+            log.warning("Could not embed colorspace in %s: %s", fname, e)
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
 
 
 def _run_image_warp(
@@ -156,6 +245,8 @@ def _run_image_warp(
     camera_id,
     output_dir: str,
     log=None,
+    overscan_width_pct: float | None = None,
+    overscan_height_pct: float | None = None,
 ) -> None:
     """Run 3DE Image Warp via sdv_image_warp_gui callback_run (same as GUI).
 
@@ -169,10 +260,19 @@ def _run_image_warp(
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
 
-    # Overscan from lens distortion (same as overscan % in the form)
-    bbox = bbdld_compute_bounding_box(camera_id)
-    w_overscan_px = int(bbox[2])
-    h_overscan_px = int(bbox[3])
+    # Overscan from distortion. Prefer percent already computed for the instance
+    # (same as the UI overscan fields, defined as main/overscan * 100),
+    # otherwise derive from distortion bbox.
+    if overscan_width_pct is not None and overscan_height_pct is not None:
+        w_orig = tde4.getCameraImageWidth(camera_id) or 1
+        h_orig = tde4.getCameraImageHeight(camera_id) or 1
+        # overscan_pct is main/overscan * 100, so overscan = main * 100 / pct
+        w_overscan_px = int((100.0 / overscan_width_pct) * w_orig)
+        h_overscan_px = int((100.0 / overscan_height_pct) * h_orig)
+    else:
+        bbox = bbdld_compute_bounding_box(camera_id)
+        w_overscan_px = int(bbox[2])
+        h_overscan_px = int(bbox[3])
     if log:
         w_orig = tde4.getCameraImageWidth(camera_id) or 1
         h_orig = tde4.getCameraImageHeight(camera_id) or 1
@@ -234,7 +334,7 @@ def _run_image_warp(
         imgw_enum.direction_undistort, output_dir,
     )
     cam_entry.set_output_file_pattern(
-        imgw_enum.direction_undistort, "frame.####.exr",
+        imgw_enum.direction_undistort, IMAGE_WARP_PATTERN,
     )
     cam_entry.initialize_frameset()
     num_frames = getattr(cam_entry, "num_frames", 0) or 0
@@ -270,7 +370,9 @@ def _run_image_warp(
         global _image_warp_poll_state
         if _image_warp_poll_state is None or not _image_warp_poll_state.is_running:
             return
-        frames = glob.glob(os.path.join(_image_warp_poll_state.output_path, "*.exr"))
+        frames = glob.glob(
+            os.path.join(_image_warp_poll_state.output_path, f"*.{IMAGE_WARP_EXT}")
+        )
         current = len(frames)
         if current >= _image_warp_poll_state.expected_frames:
             if log:
@@ -305,7 +407,7 @@ def _run_image_warp(
     start_poll = time.time()
     while _image_warp_poll_state.is_running:
         time.sleep(IMAGE_WARP_POLL_INTERVAL)
-        frames = glob.glob(os.path.join(output_dir, "*.exr"))
+        frames = glob.glob(os.path.join(output_dir, f"*.{IMAGE_WARP_EXT}"))
         if len(frames) >= num_frames:
             if log:
                 log.info("Detected %d frames - warp complete", len(frames))
@@ -321,7 +423,9 @@ def _run_image_warp(
     tde4.setTimerCallbackFunction("", 0)
     _image_warp_poll_state = None
 
-    final_frames = sorted(glob.glob(os.path.join(output_dir, "*.exr")))
+    final_frames = sorted(
+        glob.glob(os.path.join(output_dir, f"*.{IMAGE_WARP_EXT}"))
+    )
     if len(final_frames) < num_frames:
         raise KnownPublishError(
             "Incomplete warp: %d/%d frames" % (len(final_frames), num_frames)

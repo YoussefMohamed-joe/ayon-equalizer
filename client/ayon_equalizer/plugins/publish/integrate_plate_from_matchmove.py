@@ -3,9 +3,12 @@
 The undistorted_plate is published only on the matchmove instance (same path).
 This plugin runs after Integrate and creates a plate product in AYON that
 references the same representation (same path, no duplicate files) so the
-loader shows a plate product.
+loader shows a plate product. The plate representation uses the extension as
+name (e.g. "jpg") so it loads like other addons' footage in Nuke.
 """
 
+import os
+import re
 from typing import ClassVar
 
 import pyblish.api
@@ -102,13 +105,84 @@ class IntegratePlateFromMatchmove(pyblish.api.InstancePlugin):
             version_number,
             plate_product["id"],
         )
-        # Reuse matchmove version data, set families to plate
+
+        # Derive frame range for AYON:
+        # 1) Prefer sequence frame numbers from the undistorted representation files
+        #    (e.g. pip_sq01_matchmoveMain_v023.1001.jpg -> 1001–1059).
+        # 2) Fallback: use camera playback range when available.
+        # 3) Final fallback: 1001-based default (AYON/VFX standard).
+        frame_start = frame_end = None
+        rep_files = undistorted_rep.get("files") or []
+        frame_numbers: list[int] = []
+        frame_pattern = re.compile(r"\.(\d+)\.[^.]+$")
+        for item in rep_files:
+            if isinstance(item, str):
+                name = item
+            else:
+                # AYON representation 'files' can also be dicts
+                name = (
+                    item.get("name")
+                    or item.get("path")
+                    or ""
+                )
+            m = frame_pattern.search(name)
+            if m:
+                try:
+                    frame_numbers.append(int(m.group(1)))
+                except ValueError:
+                    continue
+        if frame_numbers:
+            frame_start = min(frame_numbers)
+            frame_end = max(frame_numbers)
+
+        cameras = instance.data.get("cameras") or []
+        enabled_cams = [c for c in cameras if c.get("enabled")]
+        if frame_start is None and enabled_cams:
+            try:
+                p_start, p_end = enabled_cams[0]["playback_range"]
+                frame_start = int(p_start) if p_start is not None else None
+                frame_end = int(p_end) if p_end is not None else None
+            except Exception:  # pragma: no cover - defensive
+                pass
+        # AYON default: start at 1001, end 1001+len(files)-1 or 1100 if unknown
+        if frame_start is None:
+            frame_start = 1001
+        if frame_end is None:
+            rep_files_count = len(rep_files)
+            frame_end = (
+                frame_start + max(0, rep_files_count - 1)
+                if rep_files_count
+                else (frame_start + 99)
+            )
+
+        # Matchmove version attribs: ensure numeric frameStart/frameEnd/handles.
+        matchmove_attribs = dict(version_entity.get("attrib") or {})
+        handle_start = int(matchmove_attribs.get("handleStart") or 0)
+        handle_end = int(matchmove_attribs.get("handleEnd") or 0)
+        matchmove_attribs["frameStart"] = frame_start
+        matchmove_attribs["frameEnd"] = frame_end
+        matchmove_attribs["handleStart"] = handle_start
+        matchmove_attribs["handleEnd"] = handle_end
+
+        # Update the original matchmove version in DB so any loader (including
+        # loading the matchmove itself) sees a proper frame range.
+        op_session.update_entity(
+            project_name,
+            "version",
+            version_entity["id"],
+            {"attrib": matchmove_attribs},
+        )
+
+        # Plate version data/attribs: reuse matchmove data, set families to plate,
+        # and copy the (now fixed) attribs so plate behaves like normal footage.
         version_data = dict(version_entity.get("data") or {})
         version_data["families"] = ["plate"]
+        version_attribs = dict(matchmove_attribs)
         plate_version = new_version_entity(
             version_number,
             plate_product["id"],
             data=version_data,
+            attribs=version_attribs,
             entity_id=existing_plate_version["id"] if existing_plate_version else None,
         )
         if not existing_plate_version:
@@ -116,21 +190,39 @@ class IntegratePlateFromMatchmove(pyblish.api.InstancePlugin):
             self.log.debug("Created plate version v%03d", version_number)
         else:
             plate_version["id"] = existing_plate_version["id"]
+            op_session.update_entity(
+                project_name,
+                "version",
+                plate_version["id"],
+                {
+                    "data": version_data,
+                    "attrib": version_attribs,
+                },
+            )
 
-        # Plate representation: same path and files as matchmove's undistorted_plate
+        # Plate representation: same path and files as matchmove's undistorted_plate.
+        # Use extension as representation name (e.g. "jpg") so it loads like other addons' footage.
         rep_attrib = undistorted_rep.get("attrib") or {}
         rep_data = undistorted_rep.get("data") or {}
         rep_files = list(undistorted_rep.get("files") or [])
+        plate_rep_name = (
+            rep_data.get("ext")
+            or (os.path.splitext(rep_files[0])[1].lstrip(".") if rep_files else "jpg")
+        )
+        if isinstance(plate_rep_name, str):
+            plate_rep_name = plate_rep_name.lower()
+        else:
+            plate_rep_name = "jpg"
         existing_plate_reps = get_representations(
             project_name,
             version_ids=[plate_version["id"]],
         )
-        existing_undistorted = next(
-            (r for r in existing_plate_reps if (r.get("name") or "").lower() == "undistorted_plate"),
+        existing_plate_rep = next(
+            (r for r in existing_plate_reps if (r.get("name") or "").lower() == plate_rep_name),
             None,
         )
         plate_rep = new_representation_entity(
-            "undistorted_plate",
+            plate_rep_name,
             plate_version["id"],
             rep_files,
             data=rep_data,
@@ -138,9 +230,9 @@ class IntegratePlateFromMatchmove(pyblish.api.InstancePlugin):
                 "path": rep_attrib.get("path", ""),
                 "template": rep_attrib.get("template", ""),
             },
-            entity_id=existing_undistorted["id"] if existing_undistorted else None,
+            entity_id=existing_plate_rep["id"] if existing_plate_rep else None,
         )
-        if not existing_undistorted:
+        if not existing_plate_rep:
             op_session.create_entity(project_name, "representation", plate_rep)
         else:
             op_session.update_entity(
@@ -156,9 +248,10 @@ class IntegratePlateFromMatchmove(pyblish.api.InstancePlugin):
                 },
             )
         self.log.info(
-            "Plate product %s v%03d points to matchmove undistorted_plate: %s",
+            "Plate product %s v%03d rep %s -> %s",
             plate_product_name,
             version_number,
+            plate_rep_name,
             rep_attrib.get("path", "")[:80],
         )
 

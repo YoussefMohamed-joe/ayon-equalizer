@@ -202,14 +202,15 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
                 original_plate_pattern = enabled_cams[0]["path"]
                 sattr = tde4.getCameraSequenceAttr(first_cam)
                 start_frame = sattr[0]
-                # Use AYON product name (pip_sq01_matchmoveMain_v014.*.exr) set by Extract Undistorted Plate
+                # Use AYON product name and ext (e.g. .jpg) set by Extract Undistorted Plate
                 plate_base_name = instance.data.get("plate_base_name")
+                plate_ext = instance.data.get("plate_ext", "jpg")
                 if plate_base_name:
-                    plate_pattern = f"{plate_base_name}.####.exr"
-                    first_frame_name = f"{plate_base_name}.{start_frame:04d}.exr"
+                    plate_pattern = f"{plate_base_name}.####.{plate_ext}"
+                    first_frame_name = f"{plate_base_name}.{start_frame:04d}.{plate_ext}"
                 else:
-                    plate_pattern = "frame.####.exr"
-                    first_frame_name = f"frame.{start_frame:04d}.exr"
+                    plate_pattern = f"frame.####.{plate_ext}"
+                    first_frame_name = f"frame.{start_frame:04d}.{plate_ext}"
                 full_dir = get_matchmove_publish_dir(instance)
                 if full_dir:
                     plate_path = os.path.join(full_dir, plate_pattern).replace("\\", "/")

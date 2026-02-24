@@ -25,28 +25,34 @@ def get_plate_base_name(instance: "pyblish.api.Instance") -> str:
 def rename_frames_to_ayon_style(
     undistorted_dir: Path,
     plate_base_name: str,
+    ext: str,
     log: Any,
 ) -> list[str]:
-    """Rename frame.*.exr to plate_base_name.NNNN.exr in place.
+    """Rename frame.*.<ext> to plate_base_name.NNNN.<ext> in place.
 
-    Runs multiple passes until no frame.*.exr remain (Image Warp may still
+    Runs multiple passes until no frame.*.<ext> remain (Image Warp may still
     be writing when the first pass runs). Returns the list of final filenames
-    by globbing plate_base_name.*.exr so the representation matches disk
+    by globbing plate_base_name.*.<ext> so the representation matches disk
     and AYON sees a single sequence.
 
+    Args:
+        ext: File extension without dot (e.g. "jpg" or "exr").
+
     Returns:
-        List of new filenames (e.g. pip_sq01_matchmoveMain_v014.1001.exr).
+        List of new filenames (e.g. pip_sq01_matchmoveMain_v014.1001.jpg).
     """
     time.sleep(1.5)
+    ext_lower = ext.lower()
+    pattern = re.compile(r"frame\.(\d+)\.%s$" % re.escape(ext_lower), re.IGNORECASE)
     max_passes = 5
     for _ in range(max_passes):
-        frame_files = sorted(undistorted_dir.glob("frame.*.exr"))
+        frame_files = sorted(undistorted_dir.glob(f"frame.*.{ext_lower}"))
         if not frame_files:
             break
         for f in frame_files:
-            m = re.match(r"frame\.(\d+)\.exr$", f.name, re.IGNORECASE)
+            m = pattern.match(f.name)
             if m:
-                new_name = f"{plate_base_name}.{m.group(1)}.exr"
+                new_name = f"{plate_base_name}.{m.group(1)}.{ext_lower}"
                 new_path = f.parent / new_name
                 if new_path != f:
                     try:
@@ -55,5 +61,7 @@ def rename_frames_to_ayon_style(
                         log.warning("Could not rename %s to %s: %s", f.name, new_name, e)
         time.sleep(0.5)
     # Build list from disk so we only report one pattern (no mixed frame.* + plate.*)
-    out = sorted(f.name for f in undistorted_dir.glob(f"{plate_base_name}.*.exr"))
+    out = sorted(
+        f.name for f in undistorted_dir.glob(f"{plate_base_name}.*.{ext_lower}")
+    )
     return out

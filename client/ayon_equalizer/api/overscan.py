@@ -79,8 +79,11 @@ def compute_overscan_percent(camera) -> tuple[float, float]:
     if not w_orig or not h_orig:
         raise OverscanError("Camera image width/height are zero.")
 
-    w_pct = round((w_nonsymm / w_orig) * 100.0, 4)
-    h_pct = round((h_nonsymm / h_orig) * 100.0, 4)
+    # User-facing overscan percent is defined as:
+    #   main_resolution / overscan_resolution * 100
+    # so 100% means no overscan, <100% means bigger overscan plate.
+    w_pct = round((w_orig / w_nonsymm) * 100.0, 4)
+    h_pct = round((h_orig / h_nonsymm) * 100.0, 4)
     return w_pct, h_pct
 
 
@@ -115,8 +118,9 @@ def bbdld_compute_bounding_box(camera):
     w_pct, h_pct = compute_overscan_percent(camera)
     w_orig = tde4.getCameraImageWidth(camera)
     h_orig = tde4.getCameraImageHeight(camera)
-    width = (w_pct / 100.0) * w_orig
-    height = (h_pct / 100.0) * h_orig
+    # Invert the main/overscan ratio to get overscan resolution back.
+    width = (100.0 / w_pct) * w_orig
+    height = (100.0 / h_pct) * h_orig
     return (0.0, 0.0, width, height)
 
 
