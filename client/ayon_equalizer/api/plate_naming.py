@@ -41,25 +41,38 @@ def rename_frames_to_ayon_style(
     Returns:
         List of new filenames (e.g. pip_sq01_matchmoveMain_v014.1001.jpg).
     """
-    time.sleep(1.5)
     ext_lower = ext.lower()
     pattern = re.compile(r"frame\.(\d+)\.%s$" % re.escape(ext_lower), re.IGNORECASE)
-    max_passes = 5
-    for _ in range(max_passes):
-        frame_files = sorted(undistorted_dir.glob(f"frame.*.{ext_lower}"))
-        if not frame_files:
-            break
-        for f in frame_files:
-            m = pattern.match(f.name)
-            if m:
-                new_name = f"{plate_base_name}.{m.group(1)}.{ext_lower}"
-                new_path = f.parent / new_name
-                if new_path != f:
-                    try:
-                        f.rename(new_path)
-                    except OSError as e:
-                        log.warning("Could not rename %s to %s: %s", f.name, new_name, e)
-        time.sleep(0.5)
+    
+    max_retries = 30
+    retry_delay = 0.5
+    
+    frame_files = sorted(undistorted_dir.glob(f"frame.*.{ext_lower}"))
+    for f in frame_files:
+        m = pattern.match(f.name)
+        if not m:
+            continue
+            
+        new_name = f"{plate_base_name}.{m.group(1)}.{ext_lower}"
+        new_path = f.parent / new_name
+        
+        if new_path == f:
+            continue
+            
+        success = False
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                f.rename(new_path)
+                success = True
+                break
+            except OSError as e:
+                last_error = e
+                time.sleep(retry_delay)
+                
+        if not success:
+            log.warning("Could not rename %s to %s after %d retries: %s", f.name, new_name, max_retries, last_error)
+
     # Build list from disk so we only report one pattern (no mixed frame.* + plate.*)
     out = sorted(
         f.name for f in undistorted_dir.glob(f"{plate_base_name}.*.{ext_lower}")
