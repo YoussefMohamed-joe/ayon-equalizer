@@ -266,9 +266,9 @@ def _run_image_warp(
     if overscan_width_pct is not None and overscan_height_pct is not None:
         w_orig = tde4.getCameraImageWidth(camera_id) or 1
         h_orig = tde4.getCameraImageHeight(camera_id) or 1
-        # overscan_pct is main/overscan * 100, so overscan = main * 100 / pct
-        w_overscan_px = int((100.0 / overscan_width_pct) * w_orig)
-        h_overscan_px = int((100.0 / overscan_height_pct) * h_orig)
+        # overscan_pct is overscan/main * 100, so overscan = pct/100 * main
+        w_overscan_px = int((overscan_width_pct / 100.0) * w_orig)
+        h_overscan_px = int((overscan_height_pct / 100.0) * h_orig)
     else:
         bbox = bbdld_compute_bounding_box(camera_id)
         w_overscan_px = int(bbox[2])

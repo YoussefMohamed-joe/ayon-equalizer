@@ -57,9 +57,9 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
         attr_data = self.get_attr_values_from_data(instance.data)
         use_distortion = attr_data.get("distortion", False)
 
-        # Overscan is filled automatically when creating matchmove; defaults to 100 if not set
-        overscan_width = attr_data["overscan_percent_width"] / 100.0
-        overscan_height = attr_data["overscan_percent_height"] / 100.0
+        # 3DE export expects main/overscan ratio (≤1.0); our pct is overscan/main*100
+        overscan_width = 100.0 / attr_data["overscan_percent_width"]
+        overscan_height = 100.0 / attr_data["overscan_percent_height"]
 
         # import maya export script from 3DEqualizer
         exporter_path = instance.context.data["tde4_path"] / "sys_data" / "py_scripts" / "export_maya.py"  # noqa: E501
