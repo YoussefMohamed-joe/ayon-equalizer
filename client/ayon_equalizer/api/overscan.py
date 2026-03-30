@@ -79,9 +79,7 @@ def compute_overscan_percent(camera) -> tuple[float, float]:
     if not w_orig or not h_orig:
         raise OverscanError("Camera image width/height are zero.")
 
-    # User-facing overscan percent is defined as:
-    #   overscan_resolution / main_resolution * 100
-    # so 100% means no overscan, >100% means bigger overscan plate.
+    # overscan_pct = overscan_resolution / main_resolution * 100
     w_pct = round((w_nonsymm / w_orig) * 100.0, 4)
     h_pct = round((h_nonsymm / h_orig) * 100.0, 4)
     return w_pct, h_pct
@@ -105,20 +103,15 @@ def compute_overscan_percent_from_current_camera() -> tuple[float, float]:
 
 
 def bbdld_compute_bounding_box(camera):
-    """Backward-compatible helper used by distorted-plate extractor.
-
-    Uses :func:`compute_overscan_percent` for the given camera and returns
-    (x_min, y_min, width, height) in pixels.
-    """
+    """Return (x_min, y_min, width, height) in overscan pixels for camera."""
     try:
         import tde4
-    except ImportError as exc:  # pragma: no cover
+    except ImportError as exc:
         raise OverscanError(f"tde4 module is not available: {exc!r}") from exc
 
     w_pct, h_pct = compute_overscan_percent(camera)
     w_orig = tde4.getCameraImageWidth(camera)
     h_orig = tde4.getCameraImageHeight(camera)
-    # overscan_pct = overscan/main * 100, so overscan_px = pct/100 * main
     width = (w_pct / 100.0) * w_orig
     height = (h_pct / 100.0) * h_orig
     return (0.0, 0.0, width, height)
@@ -129,12 +122,7 @@ _MATCHMOVE_PUBLISH_PLUGIN = "ExtractMatchmoveScriptMaya"
 
 
 def inject_matchmove_overscan(instance_data: dict) -> None:
-    """Fill overscan width/height on instance_data from the selected camera.
-
-    Mutates instance_data in place: sets attribute_values and
-    publish_attributes[ExtractMatchmoveScriptMaya] with overscan_percent_width
-    and overscan_percent_height. No-op on failure (e.g. no camera).
-    """
+    """Fill overscan percent on instance_data from the selected camera. No-op on failure."""
     try:
         import tde4
     except ImportError:
@@ -151,17 +139,15 @@ def inject_matchmove_overscan(instance_data: dict) -> None:
         return
     try:
         w_pct, h_pct = compute_overscan_percent(cam)
-    except (OverscanError, Exception):
+    except Exception:
         return
 
-    attrs = instance_data.get("attribute_values") or {}
-    attrs = dict(attrs)
+    attrs = dict(instance_data.get("attribute_values") or {})
     attrs["overscan_percent_width"] = w_pct
     attrs["overscan_percent_height"] = h_pct
     instance_data["attribute_values"] = attrs
 
-    pub = instance_data.get("publish_attributes") or {}
-    pub = dict(pub)
+    pub = dict(instance_data.get("publish_attributes") or {})
     plugin_attrs = dict(pub.get(_MATCHMOVE_PUBLISH_PLUGIN) or {})
     plugin_attrs["overscan_percent_width"] = w_pct
     plugin_attrs["overscan_percent_height"] = h_pct

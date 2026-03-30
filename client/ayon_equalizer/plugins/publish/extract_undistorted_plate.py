@@ -1,9 +1,4 @@
-"""Extract undistorted plate via Image Warp when Distortion is on.
-
-Single extractor that runs first: renders the Image Warp plate, then the Maya
-extractor runs after and does its work (script + path to the published plate).
-"""
-
+"""Extract undistorted plate via Image Warp when Distortion is on."""
 from typing import ClassVar
 
 import pyblish.api
@@ -12,8 +7,6 @@ from ayon_core.pipeline import publish
 from ayon_equalizer.api.distorted_plate import run_image_warp_and_add_representation
 
 _EXTRACT_MAYA_PLUGIN = "ExtractMatchmoveScriptMaya"
-
-# Run this extractor first so the Maya extractor runs after the Image Warp plate is done
 ORDER_PLATE_FIRST = pyblish.api.ExtractorOrder - 0.1
 
 
@@ -28,13 +21,12 @@ def _get_distortion(instance_data: dict) -> bool:
 
 
 class ExtractUndistortedPlate(publish.Extractor):
-    """Extract undistorted plate (Image Warp). Runs first; Maya extractor runs after."""
+    """Extract undistorted plate via Image Warp. Runs before Maya extractor."""
 
     label = "Extract Undistorted Plate (Image Warp)"
     families: ClassVar[list] = ["matchmove"]
     hosts: ClassVar[list] = ["equalizer"]
-    optional = False  # Always in list; no-op when Distortion is off
-
+    optional = False
     order = ORDER_PLATE_FIRST
 
     def process(self, instance: pyblish.api.Instance) -> None:
