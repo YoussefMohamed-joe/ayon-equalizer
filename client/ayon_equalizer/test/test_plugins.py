@@ -6,6 +6,7 @@ These test need to be run in 3DEqualizer.
 import json
 import re
 import unittest
+import dataclasses
 from dataclasses import dataclass
 
 AYON_CONTAINER_ID = "test.container"
@@ -86,7 +87,7 @@ def add_container(container: Container) -> None:
             containers.remove(_container)
             break
 
-    containers.append(container)
+    containers.append(dataclasses.asdict(container))
 
     context_data["containers"] = containers
     update_context_data(context_data, {})
@@ -107,6 +108,8 @@ class TestEqualizer(unittest.TestCase):
             Container(name="test", representation="test_A")
         )
 
+        assert isinstance(get_containers()[0], dict), "container is not a dictionary" # noqa: S101
+        assert "name" in get_containers()[0], "name key is not in container dictionary" # noqa: S101
         assert len(get_containers()) == 1, "container not added"  # noqa: S101
         assert get_containers()[0]["name"] == "test",\
             "container name is not correct"  # noqa: S101

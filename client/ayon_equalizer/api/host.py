@@ -123,16 +123,14 @@ class EqualizerHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         """Return the current workfile path."""
         return tde4.getProjectPath()
 
-    def get_containers(self) -> Generator[Container, Any, Optional[list]]:
+    def get_containers(self) -> Generator[dict, Any, Optional[list]]:
         """Get containers from the current workfile."""
         # sourcery skip: use-named-expression
         data = self.get_ayon_data() or {}
         for container in data.get(EQUALIZER_CONTAINERS_KEY, []):
-            # convert dict to dataclass
-            _container = Container(**container)
             # check if the container is valid
-            if _container.name and _container.namespace:
-                yield _container
+            if container.get("name") and container.get("namespace"):
+                yield container
 
     def add_container(self, container: Container) -> None:
         """Add a container to the current workfile.
@@ -141,13 +139,13 @@ class EqualizerHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
             container (Container): Container to add.
 
         """
-        data = self.get_ayon_data()
+        data = self.get_ayon_data() or {}
         containers = list(self.get_containers())
         to_remove = [
             idx
             for idx, _container in enumerate(containers)
-            if _container.name == container.name
-            and _container.namespace == container.namespace
+            if _container.get("name") == container.name
+            and _container.get("namespace") == container.namespace
         ]
         for idx in reversed(to_remove):
             containers.pop(idx)
