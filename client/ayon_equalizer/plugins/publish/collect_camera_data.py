@@ -26,7 +26,7 @@ class CollectCameraData(pyblish.api.InstancePlugin):
 
         """
         try:
-            camera_sel = instance.data["creator_attributes"]["camera_selection"]  # noqa: E501
+            camera_sel = instance.data["creator_attributes"]["camera_selection"]
         except KeyError:
             self.log.warning("No camera defined")
             return
@@ -47,30 +47,63 @@ class CollectCameraData(pyblish.api.InstancePlugin):
             cameras = [camera_sel]
 
         data = []
-
         for camera in cameras:
-            camera_name = tde4.getCameraName(camera)
-            enabled = tde4.getCameraEnabledFlag(camera)
-            # calculation range
-            c_range_start, c_range_end = tde4.getCameraCalculationRange(
-                camera)
-            p_range_start, p_range_end = tde4.getCameraPlaybackRange(camera)
-            fov = tde4.getCameraFOV(camera)
-            fps = tde4.getCameraFPS(camera)
-            # focal length is time based, so lets skip it for now
-            # focal_length = tde4.getCameraFocalLength(camera, frame)
-            path = tde4.getCameraPath(camera)
-
-            camera_data = {
-                "name": camera_name,
+            data.append({
+                "name": tde4.getCameraName(camera),
                 "id": camera,
-                "enabled": enabled,
-                "calculation_range": (c_range_start, c_range_end),
-                "playback_range": (p_range_start, p_range_end),
-                "fov": fov,
-                "fps": fps,
-                # "focal_length": focal_length,
-                "path": path
-            }
-            data.append(camera_data)
+                "enabled": tde4.getCameraEnabledFlag(camera),
+                "calculation_range": tde4.getCameraCalculationRange(camera),
+                "playback_range": tde4.getCameraPlaybackRange(camera),
+                "fov": tde4.getCameraFOV(camera),
+                "fps": tde4.getCameraFPS(camera),
+                "path": tde4.getCameraPath(camera),
+            })
+
         instance.data["cameras"] = data
+        self._collect_distortion_attributes(instance, data)
+
+    def _collect_distortion_attributes(self, instance, cameras):
+        """Save distortion state and overscan resolution to versionAttributes.
+
+        When Distortion is ON in the creator: saves 'distorted' + the actual
+        pixel resolution of the overscan image so downstream DCCs can override
+        their render resolution on load.
+
+        When Distortion is OFF: saves 'undistorted' only — no resolution saved,
+        no override will happen downstream.
+        """
+        # The 'distortion' checkbox and overscan values are stored as publish attributes 
+        # specifically under the ExtractMatchmoveScriptMaya plugin data.
+        publish_attrs = instance.data.get("publish_attributes", {})
+        extract_attrs = publish_attrs.get("ExtractMatchmoveScriptMaya", {})
+        
+        # Because we also injected them into creator_attributes or attribute_values, check both safely
+        use_distortion = extract_attrs.get("distortion", False)
+
+        if "versionAttributes" not in instance.data:
+            instance.data["versionAttributes"] = {}
+
+        if use_distortion:
+            first_cam = next(
+                (c["id"] for c in cameras if c["enabled"]),
+                cameras[0]["id"] if cameras else None,
+            )
+            if first_cam:
+                base_w = tde4.getCameraImageWidth(first_cam)
+                base_h = tde4.getCameraImageHeight(first_cam)
+            else:
+                base_w, base_h = 1920, 1080
+
+            overscan_pct_w = float(extract_attrs.get("overscan_percent_width", 100.0))
+            overscan_pct_h = float(extract_attrs.get("overscan_percent_height", 100.0))
+
+            overscan_w_px = int(round(base_w * overscan_pct_w / 100.0))
+            overscan_h_px = int(round(base_h * overscan_pct_h / 100.0))
+
+            instance.data["versionAttributes"]["mmDistortionState"] = True
+            instance.data["versionAttributes"]["mmOverscanWidth"] = overscan_w_px
+            instance.data["versionAttributes"]["mmOverscanHeight"] = overscan_h_px
+            self.log.info("Distorted matchmove. Overscan resolution: %dx%d", overscan_w_px, overscan_h_px)
+        else:
+            instance.data["versionAttributes"]["mmDistortionState"] = False
+            self.log.debug("Undistorted matchmove. No resolution override will be applied.")

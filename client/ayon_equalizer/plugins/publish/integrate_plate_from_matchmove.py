@@ -44,12 +44,7 @@ class IntegratePlateFromMatchmove(pyblish.api.InstancePlugin):
             return
 
         project_name = instance.context.data["projectName"]
-        product_name = (
-            instance.data.get("productName")
-            or instance.data.get("name")
-            or "matchmoveMain"
-        )
-        plate_product_name = f"{product_name}_plate"
+        plate_product_name = "undistortedPlate"
 
         repres = get_representations(
             project_name,
@@ -100,9 +95,40 @@ class IntegratePlateFromMatchmove(pyblish.api.InstancePlugin):
         matchmove_attribs.setdefault("handleStart", 0)
         matchmove_attribs.setdefault("handleEnd", 0)
 
+        # Store overscan resolution so the ayon-rank pre-launch hook can read it
+        # and apply the correct render resolution in Maya / Houdini / Blender.
+        overscan_w, overscan_h = self._get_overscan_resolution(instance)
+        if overscan_w and overscan_h:
+            matchmove_attribs["resolutionWidth"] = overscan_w
+            matchmove_attribs["resolutionHeight"] = overscan_h
+            self.log.info(
+                "Stored overscan resolution %dx%d on plate version attribs.",
+                overscan_w, overscan_h,
+            )
+
         op_session.update_entity(
             project_name, "version", version_entity["id"],
             {"attrib": matchmove_attribs},
+        )
+
+        # Sync distortion attributes to the folder so DCC startups (Maya/Houdini)
+        # can read mmDistortionState, mmOverscanWidth, mmOverscanHeight directly.
+        if overscan_w and overscan_h:
+            folder_attribs = {
+                "mmDistortionState": True,
+                "mmOverscanWidth": overscan_w,
+                "mmOverscanHeight": overscan_h,
+            }
+        else:
+            folder_attribs = {"mmDistortionState": False}
+
+        op_session.update_entity(
+            project_name, "folder", folder_entity["id"],
+            {"attrib": folder_attribs},
+        )
+        self.log.info(
+            "Updated folder %s with mmDistortionState=%s.",
+            folder_entity.get("path"), bool(overscan_w and overscan_h),
         )
 
         version_data = dict(version_entity.get("data") or {})
@@ -176,6 +202,35 @@ class IntegratePlateFromMatchmove(pyblish.api.InstancePlugin):
             (rep.get("name") or "").lower() == "undistorted_plate"
             for rep in instance.data.get("representations") or []
         )
+
+    @staticmethod
+    def _get_overscan_resolution(instance: pyblish.api.Instance) -> tuple[int, int]:
+        """Return (width, height) overscan pixels from instance attribute_values.
+
+        The image warp extractor already computed these values and stored them
+        in attribute_values as overscan_percent_width/height. We convert back
+        to pixels using the camera's original dimensions.
+        Returns (0, 0) if resolution cannot be determined.
+        """
+        attrs = instance.data.get("attribute_values") or {}
+        try:
+            import tde4
+            cameras = instance.data.get("cameras") or []
+            enabled = [c for c in cameras if c.get("enabled")]
+            if not enabled:
+                return 0, 0
+            cam_id = enabled[0]["id"]
+            w_orig = tde4.getCameraImageWidth(cam_id) or 0
+            h_orig = tde4.getCameraImageHeight(cam_id) or 0
+            if not w_orig or not h_orig:
+                return 0, 0
+            w_pct = float(attrs.get("overscan_percent_width") or 0)
+            h_pct = float(attrs.get("overscan_percent_height") or 0)
+            if not w_pct or not h_pct:
+                return 0, 0
+            return int(round(w_pct / 100.0 * w_orig)), int(round(h_pct / 100.0 * h_orig))
+        except Exception:
+            return 0, 0
 
     @staticmethod
     def _resolve_frame_range(
