@@ -1,7 +1,7 @@
 """3DEqualizer addon package definition."""
 name = "equalizer"
 title = "3DEqualizer"
-version = "0.2.0+rankV2"
+version = "0.2.0+rankV3"
 app_host_name = "equalizer"
 client_dir = "ayon_equalizer"
 project_can_override_addon_version = True
