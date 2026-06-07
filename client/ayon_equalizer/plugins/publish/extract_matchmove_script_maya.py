@@ -1,6 +1,7 @@
 """Extract project for Maya."""
 
 import os
+import re
 from pathlib import Path
 from typing import ClassVar
 
@@ -57,7 +58,11 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
         attr_data = self.get_attr_values_from_data(instance.data)
         use_distortion = attr_data.get("distortion", False)
 
-        # 3DE export expects main/overscan ratio (≤1.0); our pct is overscan/main*100
+        # 3DE export expects main/overscan ratio (≤1.0 when overscan exists).
+        # Our pct = overscan_resolution / main_resolution * 100, so:
+        #   distortion OFF → pct = 100 → ratio = 1.0 (no scaling)
+        #   distortion ON  → pct > 100 → ratio < 1.0 (camera frustum scaled)
+        # This matches what 3DE's GUI passes when the user enables distortion.
         overscan_width = 100.0 / attr_data["overscan_percent_width"]
         overscan_height = 100.0 / attr_data["overscan_percent_height"]
 
@@ -191,7 +196,7 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
             raise KnownPublishError(err_msg)
 
         # When distortion is enabled, point Maya script to the undistorted
-        # plate EXRs. Prefer full publish path so the script works without relying on CWD.
+        # plate. Rewrite image paths in the exported Python script.
         if use_distortion and instance.context.data["tde4_version"].major == EQUALIZER_8:
             enabled_cams = [
                 c for c in instance.data["cameras"]
@@ -221,17 +226,13 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
                 script_path = Path(f"{file_path.as_posix()}.py")
                 if script_path.exists():
                     content = script_path.read_text(encoding="utf-8")
-                    original_escaped = original_plate_pattern.replace(
-                        "\\", "\\\\"
-                    )
-                    content = content.replace(
-                        original_escaped, plate_path
-                    )
-                    maya_prepare = exporter._maya_prepareImagePath(  # noqa: SLF001
-                        original_plate_pattern, start_frame
-                    )
-                    content = content.replace(
-                        maya_prepare, first_frame_path
+                    content = self._rewrite_image_paths(
+                        content,
+                        original_plate_pattern,
+                        plate_path,
+                        first_frame_path,
+                        exporter,
+                        start_frame,
                     )
                     script_path.write_text(content, encoding="utf-8")
                     self.log.debug(
@@ -241,3 +242,72 @@ class ExtractMatchmoveScriptMaya(publish.Extractor,
 
         self.log.debug("output: %s", file_path.as_posix())
         instance.data["representations"].append(representation)
+
+    @staticmethod
+    def _rewrite_image_paths(
+        content: str,
+        original_plate_pattern: str,
+        new_plate_path: str,
+        new_first_frame_path: str,
+        exporter,
+        start_frame: int,
+    ) -> str:
+        """Rewrite image paths in exported Maya Python script.
+
+        Uses multiple strategies to find and replace the original plate
+        path with the undistorted plate path:
+        1. Try exact string replacement with various escaping variants
+        2. Try the _maya_prepareImagePath result
+        3. Fall back to regex matching on the filename portion
+        """
+        # Build all variants of the original path to try replacing
+        original_fwd = original_plate_pattern.replace("\\", "/")
+        original_back = original_plate_pattern.replace("/", "\\")
+        original_double_back = original_back.replace("\\", "\\\\")
+
+        replaced = False
+        # Try each variant of the original path
+        for variant in (original_double_back, original_back, original_fwd, original_plate_pattern):
+            if variant and variant in content:
+                content = content.replace(variant, new_plate_path)
+                replaced = True
+                break
+
+        # Also try replacing the _maya_prepareImagePath result (first-frame path)
+        try:
+            maya_prepare = exporter._maya_prepareImagePath(  # noqa: SLF001
+                original_plate_pattern, start_frame
+            )
+            if maya_prepare and maya_prepare in content:
+                content = content.replace(maya_prepare, new_first_frame_path)
+                replaced = True
+        except Exception:
+            pass
+
+        # If exact match failed, try regex on the filename portion.
+        # The 3DE exporter may have transformed the path, so we match on
+        # just the base filename (with frame padding or frame number).
+        if not replaced:
+            original_basename = os.path.basename(original_fwd)
+            if original_basename:
+                # Escape for regex but allow flexible frame padding
+                # e.g. "plate.1001.jpg" or "plate.####.jpg"
+                base_no_ext = os.path.splitext(original_basename)[0]
+                ext = os.path.splitext(original_basename)[1]
+                # Match any path containing this filename with any number format
+                escaped_base = re.escape(base_no_ext)
+                escaped_ext = re.escape(ext)
+                # Replace digits or # padding
+                pattern = escaped_base.replace(r"\#\#\#\#", r"[#\d]+")
+                pattern = re.sub(r"\\d\+|\d+", r"[#\\d]+", pattern)
+                # Match the full quoted path containing this filename
+                path_regex = re.compile(
+                    r'(["\'])([^"\']*/?' + pattern + escaped_ext + r')\1'
+                )
+                content = path_regex.sub(
+                    lambda m: m.group(1) + new_plate_path + m.group(1),
+                    content,
+                    count=0,
+                )
+
+        return content

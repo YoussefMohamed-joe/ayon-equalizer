@@ -116,7 +116,7 @@ class ExtractScriptBase(OptionalPyblishPluginMixin):
     distortion = False
     overscan_percent_width = 100
     overscan_percent_height = 100
-    units = "mm"
+    units = "cm"
 
     @classmethod
     def apply_settings(
